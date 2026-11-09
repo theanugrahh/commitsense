@@ -62,6 +62,9 @@ def merge_repo(tmp_path: Path) -> Path:
     repo_dir = tmp_path / "mergey"
     repo_dir.mkdir()
     repo = Repo.init(repo_dir, initial_branch="main")
+    with repo.config_writer() as cw:
+        cw.set_value("user", "name", "Merge Tester")
+        cw.set_value("user", "email", "merge@example.com")
 
     p = repo_dir / "base.txt"
     p.write_text("base\n")
