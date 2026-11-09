@@ -1,0 +1,133 @@
+"""Downloadable analysis report generation (Markdown)."""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from analyzer.quality import SUGGESTIONS
+
+
+def build_markdown_report(analysis: dict, quality: dict, repo_path: str, branches: list[str]) -> str:
+    """Render the full analysis into a Markdown document.
+
+    Uses ONLY the actual analysis dicts produced by analyzer modules —
+    no fabricated statistics.
+    """
+    headline = analysis["headline"]
+    contributors = analysis["contributors"]
+    file_changes = analysis["file_changes"]
+    grades = quality["grades"]
+    total = quality["total"]
+
+    lines: list[str] = []
+    lines.append(f"# CommitSense Report — {repo_path}")
+    lines.append("")
+    lines.append(f"_Generated: {datetime.now():%Y-%m-%d %H:%M:%S}_")
+    lines.append("")
+    lines.append("## Overview")
+    lines.append("")
+    lines.append(f"- **Total commits:** {headline['total_commits']}")
+    lines.append(f"- **Merge commits:** {headline['merge_commits']}")
+    lines.append(f"- **Contributors:** {headline['contributors']}")
+    if headline["most_active"]:
+        lines.append(
+            f"- **Most active contributor:** {headline['most_active']['name']} "
+            f"({headline['most_active']['commits']} commits)"
+        )
+    if branches:
+        lines.append(f"- **Branches ({len(branches)}):** {', '.join(branches[:20])}")
+    if headline["first_commit_at"] and headline["last_commit_at"]:
+        lines.append(
+            f"- **History window:** {headline['first_commit_at']:%Y-%m-%d} "
+            f"→ {headline['last_commit_at']:%Y-%m-%d}"
+        )
+    lines.append(
+        f"- **Lines added/deleted:** +{headline['total_insertions']} / "
+        f"-{headline['total_deletions']}"
+    )
+    lines.append("")
+
+    lines.append("## Commit message quality")
+    lines.append("")
+    lines.append(f"- **Good:** {grades['good']}  |  **Fair:** {grades['fair']}  |  **Poor:** {grades['poor']}")
+    lines.append(f"- **Average message score:** {quality['avg_score']:.0f}/100")
+    lines.append(f"- **Overall health:** {quality['health']}")
+    lines.append("")
+
+    if quality["top_rules"]:
+        lines.append("### Top quality issues")
+        lines.append("")
+        for rule, count in quality["top_rules"][:5]:
+            suggestion = SUGGESTIONS.get(rule, "")
+            lines.append(f"- `{rule}` — {count} commit(s). {suggestion}")
+        lines.append("")
+
+    lines.append("### Large commits")
+    lines.append("")
+    if headline["large_commits"]:
+        lines.append(
+            "Large commits usually mean mixed concerns. They are not "
+            "security issues by themselves, but they are harder to review "
+            "and revert:"
+        )
+        lines.append("")
+        for c in headline["large_commits"][:15]:
+            subject = c.message.splitlines()[0][:80] if c.message else "(no message)"
+            lines.append(
+                f"- `{c.short_sha}` — {c.num_files} files, "
+                f"{c.total_lines} lines: {subject}"
+            )
+        if len(headline["large_commits"]) > 15:
+            lines.append(f"- … and {len(headline['large_commits']) - 15} more")
+    else:
+        lines.append("No unusually large commits detected.")
+    lines.append("")
+
+    lines.append("## Most frequently modified files")
+    lines.append("")
+    if file_changes:
+        lines.append("| File | Change count |")
+        lines.append("|---|---|")
+        for name, count in file_changes[:20]:
+            lines.append(f"| {name} | {count} |")
+    else:
+        lines.append("_No file change data available._")
+    lines.append("")
+
+    lines.append("## Contributors")
+    lines.append("")
+    if contributors:
+        lines.append("| Author | Commits | +lines | −lines |")
+        lines.append("|---|---|---|---|")
+        ranked = sorted(
+            contributors.values(), key=lambda e: e["commits"], reverse=True
+        )
+        for entry in ranked[:20]:
+            lines.append(
+                f"| {entry['name']} | {entry['commits']} | "
+                f"{entry['insertions']} | {entry['deletions']} |"
+            )
+    else:
+        lines.append("_No contributor data._")
+    lines.append("")
+
+    lines.append("## Suggestions")
+    lines.append("")
+    for rule, _ in quality["top_rules"][:6]:
+        suggestion = SUGGESTIONS.get(rule)
+        if suggestion:
+            lines.append(f"- {suggestion}")
+    issues = []
+    if headline["large_commit_count"]:
+        issues.append(
+            f"- {headline['large_commit_count']} large commit(s). Split big "
+            "changes into smaller, reviewable commits (feature / fix / refactor)."
+        )
+    if not issues and not quality["top_rules"]:
+        issues.append("- History looks clean; keep up the practice.")
+    lines.extend(issues)
+    lines.append("")
+    lines.append("---")
+    lines.append("_Generated by CommitSense from actual repository data._")
+
+    return "\n".join(lines)
